@@ -1,0 +1,11 @@
+[general]
+saving_dir=string()
+depth_range_min=integer(1, 65535, default=494)
+depth_range_max=integer(1, 65535, default=750)
+
+[video_params]
+fps=integer(default=15)
+recording_duration=integer(default=1200)
+inter_recording_duration=integer(default=1200)
+color=boolean(default=True)
+depth=boolean(default=True)

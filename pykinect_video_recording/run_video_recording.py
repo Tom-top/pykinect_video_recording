@@ -5,7 +5,7 @@ Created on Fri Mar 19 11:08:11 2021
 @author: thomas.topilko
 """
 
-import kinect_video_recording as kvr
+import video_recording as kvr
 
 experiment, animal = 210319, 125
 kinect = kvr.Kinect(experiment, animal)

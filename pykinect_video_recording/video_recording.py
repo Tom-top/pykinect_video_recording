@@ -31,31 +31,28 @@ class Kinect:
         self._experiment = experiment
         self._animal = animal
         self._verbose = verbose
+        self.update_current_time()
         self._monitor_size = pyautogui.size()
-        self._time = str(datetime.now().strftime("%H-%M-%S"))
-        self._position_live = (1370, 250)
-        self._position_record = (1500, 250)
+        self._position_live_button_doric = (1370, 250)
+        self._position_record_button_doric = (1500, 250)
 
         self.initialize_kinect()
         self._color_width, self._color_height = self.get_color_dimensions()
-        self._area_color = self._color_width * self._color_height
+        self._color_area = self._color_width * self._color_height
         self._color_space_point = PyKinectV2._ColorSpacePoint
-        #        self._resizing_factor_color = 1
-        self._resizing_factor_color = self.divide_until_smaller(self._color_width, self._monitor_size[0] / 2)
-        self._window_width_color = int(self._color_width / self._resizing_factor_color)
-        self._window_height_color = int(self._color_height / self._resizing_factor_color)
+        self._window_resizing_factor = 0.3
+        self._window_width = int(self._color_width * self._window_resizing_factor)
+        self._window_height = int(self._color_height * self._window_resizing_factor)
 
         self._depth_width, self._depth_height = self.get_depth_dimensions()
-        self._area_depth = self._depth_width * self._depth_height
+        self._depth_area = self._depth_width * self._depth_height
         self._depth_space_point = PyKinectV2._DepthSpacePoint
-        self._depth_x, self._depth_y = self.determine_registration_parameters()
-        #        self._resizing_factor_depth = 1
-        self._resizing_factor_depth = self.divide_until_smaller(self._depth_width, self._monitor_size[1] / 2)
-        self._window_width_depth = int(self._depth_width / self._resizing_factor_depth)
-        self._window_height_depth = int(self._depth_height / self._resizing_factor_depth)
 
         self._roi_reference = []
-        self.range_for_conversion_is_set = False
+        self.range_for_depth_conversion_is_set = False
+
+        self._video_number = 0
+        self._zfilled_video_number = self.get_zfilled_video_number()
 
     def initialize_kinect(self):
         self._kinect = PyKinectRuntime.PyKinectRuntime(
@@ -129,16 +126,16 @@ class Kinect:
         """Inspired by https://github.com/KonstantinosAng/
         PyKinect2-Mapper-Functions/blob/master/mapper.py
         """
-        color_to_depth_points_type = self._depth_space_point * self._area_color
+        color_to_depth_points_type = self._depth_space_point * self._color_area
         color_to_depth_points = ctypes.cast(color_to_depth_points_type(),
                                             ctypes.POINTER(self._depth_space_point))
         self._kinect._mapper. \
-            MapColorFrameToDepthSpace(ctypes.c_uint(self._area_depth),
+            MapColorFrameToDepthSpace(ctypes.c_uint(self._depth_area),
                                       self._kinect._depth_frame_data,
-                                      ctypes.c_uint(self._area_color),
+                                      ctypes.c_uint(self._color_area),
                                       color_to_depth_points)
         depth_x_y = np.copy(np.ctypeslib.as_array(color_to_depth_points,
-                                                  shape=(self._area_color,)))
+                                                  shape=(self._color_area,)))
         depth_x_y = depth_x_y.view(np.float32).reshape(depth_x_y.shape + (-1,))
         depth_x_y += 0.5
         depth_x_y = depth_x_y.reshape(self._color_height,
@@ -149,7 +146,7 @@ class Kinect:
 
         return depth_x, depth_y
 
-    def register_depth_to_rgb(self, flip=True):
+    def register_depth_to_color(self, flip=True):
         raw_depth_frame = self.get_depth_frame(flip=False, return_raw=True)
         if raw_depth_frame is None:
             return None
@@ -166,25 +163,29 @@ class Kinect:
         self._roi_width = abs(self._roi_reference[0][0] - self._roi_reference[1][0])
         self._roi_height = abs(self._roi_reference[0][1] - self._roi_reference[1][1])
 
-    def set_roi(self):
+    def set_roi(self, resize_window=None):
         self._roi_reference = []
-        self.rgb_frame_roi = self.get_color_frame()
-        self.rgb_clone_roi = self.rgb_frame_roi.copy()
+        self.color_frame_roi = self.get_color_frame()
+        self.color_clone_roi = self.color_frame_roi.copy()
 
-        cv2.namedWindow("rgb_frame", cv2.WINDOW_NORMAL)
-        #        cv2.resizeWindow("rgb_frame", (self._color_width, self._color_height))
-        cv2.resizeWindow("rgb_frame", (self._window_width_color, self._window_height_color))
-        cv2.setMouseCallback("rgb_frame", self.select_and_crop)
+        cv2.namedWindow("color_frame", cv2.WINDOW_NORMAL)
+        if resize_window is None:
+            cv2.resizeWindow("color_frame", (self._window_width, self._window_height))
+        else:
+            window_width = int(self._color_width * resize_window)
+            window_height = int(self._color_height * resize_window)
+            cv2.resizeWindow("color_frame", (window_width, window_height))
+        cv2.setMouseCallback("color_frame", self.select_and_crop)
 
         while True:
-            cv2.imshow("rgb_frame", self.rgb_frame_roi)
+            cv2.imshow("color_frame", self.color_frame_roi)
             key = cv2.waitKey(10) & 0xFF
 
             if key == ord("r"):
                 if self._verbose:
                     print("[INFO] ROI was reset")
                 self._roi_reference = []
-                self.rgb_frame_roi = self.rgb_clone_roi.copy()
+                self.color_frame_roi = self.color_clone_roi.copy()
             elif key == ord("c"):
                 if self._verbose:
                     print("[INFO] ROI successfully set")
@@ -195,17 +196,21 @@ class Kinect:
         for i in range(1, 5):
             cv2.waitKey(1)
 
-    def select_and_crop(self, event, x, y, flags, param):
+    def select_and_crop(self, event, x, y):
         if event == cv2.EVENT_LBUTTONDOWN:
             self._roi_reference = [(x, y)]
         elif event == cv2.EVENT_LBUTTONUP:
             self._roi_reference.append((x, y))
 
-        if len(self._roi_reference) == 2 and self._roi_reference is not None:
+        if len(self._roi_reference) == 2:
             self._roi_width = abs(self._roi_reference[0][0] - self._roi_reference[1][0])
             self._roi_height = abs(self._roi_reference[0][1] - self._roi_reference[1][1])
-            cv2.rectangle(self.rgb_frame_roi, self._roi_reference[0], self._roi_reference[1], (0, 0, 255), 2)
-            cv2.imshow("rgb_frame", self.rgb_frame_roi)
+            cv2.rectangle(self.color_frame_roi,
+                          self._roi_reference[0],
+                          self._roi_reference[1],
+                          (0, 0, 255),
+                          2)
+            cv2.imshow("color_frame", self.color_frame_roi)
 
     def crop_frame_from_params(self, frame):
         if self._roi_reference:
@@ -216,7 +221,7 @@ class Kinect:
 
     def set_16bit_data_range(self, vmin=0, vmax=256):
         vmin, vmax = int(vmin), int(vmax)
-        self.range_for_conversion_is_set = True
+        self.range_for_depth_conversion_is_set = True
         if vmin < 0 and vmax < 0:
             raise KinectException("vmin and vmax can't both be negative")
         if vmin > vmax:
@@ -232,7 +237,7 @@ class Kinect:
         self._depth_vmax = vmax
 
     def check_depth_histogram(self, zoom_raw=(), bins=300):
-        depth_frame = self.register_depth_to_rgb()
+        depth_frame = self.register_depth_to_color()
         cropped_depth_frame = self.crop_frame_from_params(depth_frame)
         scaled_depth_frame = self.scale_image_to_8bit_from_data_range(cropped_depth_frame,
                                                                       self._depth_vmin,
@@ -275,37 +280,54 @@ class Kinect:
         plt.tight_layout()
         plt.show()
 
-    def check_camera_feed(self):
-        cv2.namedWindow("color", cv2.WINDOW_NORMAL)
-        cv2.resizeWindow("color", (self._window_width_color, self._window_height_color))
-        cv2.namedWindow("depth", cv2.WINDOW_NORMAL)
-        cv2.resizeWindow("depth", (self._window_width_color, self._window_height_color))
+    def set_percentage_window_size(self, percentage):
+        self._window_resizing_factor = percentage
+
+    def show_live_feed(self, color=True, depth=True, flip=True):
+        if color and not depth:
+            cv2.namedWindow("color", cv2.WINDOW_NORMAL)
+            cv2.resizeWindow("color", (self._window_width, self._window_height))
+        elif depth and not color:
+            cv2.namedWindow("depth", cv2.WINDOW_NORMAL)
+            cv2.resizeWindow("depth", (self._window_width, self._window_height))
+        elif color and depth:
+            cv2.namedWindow("color_and_depth", cv2.WINDOW_NORMAL)
+            cv2.resizeWindow("color_and_depth", (self._window_width * 2, self._window_height))
+
         while True:
-            color_frame = self.get_color_frame(flip=True)
-            color_frame = self.crop_frame_from_params(color_frame)
-            color_frame = color_frame[:, :, :3]
+            if color:
+                current_color_frame = self.get_color_frame(flip=flip)
+                current_color_frame = self.crop_frame_from_params(current_color_frame)
+                current_color_frame = current_color_frame[:, :, :3]
+            if depth:
+                current_depth_frame = self.register_depth_to_color(flip=flip)
+                current_depth_frame = self.crop_frame_from_params(current_depth_frame)
+                if self.range_for_depth_conversion_is_set:
+                    current_depth_frame = self.scale_image_to_8bit_from_data_range(current_depth_frame,
+                                                                                   self._depth_vmin,
+                                                                                   self._depth_vmax)
+                else:
+                    current_depth_frame = self.scale_image_to_8bit(current_depth_frame)
 
-            depth_frame = self.register_depth_to_rgb(flip=True)
-            depth_frame = self.crop_frame_from_params(depth_frame)
-            if self.range_for_conversion_is_set:
-                depth_frame = self.scale_image_to_8bit_from_data_range(depth_frame,
-                                                                       self._depth_vmin,
-                                                                       self._depth_vmax)
-            depth_frame = depth_frame.astype("uint8")
+            if color and not depth:
+                cv2.imshow("color", current_color_frame)
+            elif depth and not color:
+                cv2.imshow("depth", current_depth_frame)
+            elif color and depth:
+                color_and_depth = cv2.hstack((current_color_frame, current_depth_frame))
+                cv2.imshow("color_and_depth", color_and_depth)
 
-            cv2.imshow("color", color_frame)
-            cv2.imshow("depth", depth_frame)
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 break
         cv2.destroyAllWindows()
 
     def set_video_writers(self, fps, saving_directory, color=True, depth=True):
-        self._time = str(datetime.now().strftime("%H-%M-%S"))
+        self.update_current_time()
         if color:
             color_video_path = os.path.join(saving_directory,
                                             "color_video_{}_{}_{}.mp4"
                                             .format(self._experiment,
-                                                    self._time,
+                                                    self._zfilled_video_number,
                                                     self._animal))
             if self._roi_reference:
                 color_width, color_height = self._roi_width, self._roi_height
@@ -320,7 +342,7 @@ class Kinect:
             depth_video_path = os.path.join(saving_directory,
                                             "depth_video_{}_{}_{}.mp4"
                                             .format(self._experiment,
-                                                    self._time,
+                                                    self._zfilled_video_number,
                                                     self._animal))
             if self._roi_reference:
                 depth_width, depth_height = self._roi_width, self._roi_height
@@ -337,7 +359,6 @@ class Kinect:
                             saving_directory,
                             fps=15,
                             recording_duration=20 * 60,
-                            inter_recording_duration=20 * 60,
                             color=True,
                             depth=True):
         if not any([color, depth]):
@@ -358,7 +379,7 @@ class Kinect:
         delay_between_frames = 1 / fps
         start_timer = time.time()
         fps_timer = time.time()
-        self.move_to_and_click(self._position_record)
+        self.move_to_and_click(self._position_record_button_doric)
 
         while True:
             if self.stop_capture:
@@ -381,9 +402,9 @@ class Kinect:
                 if depth:
                     depth_frame = None
                     while depth_frame is None:
-                        depth_frame = self.register_depth_to_rgb(flip=True)
+                        depth_frame = self.register_depth_to_color(flip=True)
                     depth_frame = self.crop_frame_from_params(depth_frame)
-                    if self.range_for_conversion_is_set:
+                    if self.range_for_depth_conversion_is_set:
                         depth_frame = self.scale_image_to_8bit_from_data_range(depth_frame,
                                                                                self._depth_vmin,
                                                                                self._depth_vmax)
@@ -391,9 +412,8 @@ class Kinect:
                     self.queue_video_writer_depth.write(depth_frame)
                 fps_timer = cur_timer
             if (cur_timer - start_timer) > recording_duration:
-                self.move_to_and_click(self._position_record)
+                self.move_to_and_click(self._position_record_button_doric)
                 break
-        return True
 
     def capture_camera_feed_loop(self,
                                  saving_directory,
@@ -402,8 +422,8 @@ class Kinect:
                                  inter_recording_duration=20 * 60,
                                  color=True,
                                  depth=True):
-        shutil.copy(os.path.join(os.getcwd(), "config.ini"),
-                    os.path.join(saving_directory, "config_{}_{}.ini"\
+        shutil.copy(os.path.join(os.getcwd(), "config.cfg"),
+                    os.path.join(saving_directory, "config_{}_{}.ini" \
                                  .format(self._animal, self._experiment)),
                     )
         fps = int(fps)
@@ -415,19 +435,27 @@ class Kinect:
         while True:
             try:
                 if can_start:
-                    self.capture_camera_feed(saving_directory,
+                    self._zfilled_video_number = self.get_zfilled_video_number()
+                    saving_folder_path = os.path.join(saving_directory,
+                                                      "{}_{}".format(self._animal,
+                                                                     self._zfilled_video_number))
+                    if os.path.exists(saving_folder_path):
+                        if os.listdir(saving_folder_path) != 0:
+                            self.clean_directory(saving_folder_path)
+                    os.mkdir(saving_folder_path)
+                    self.capture_camera_feed(saving_folder_path,
                                              fps=fps,
                                              recording_duration=recording_duration,
                                              inter_recording_duration=inter_recording_duration,
                                              color=color,
                                              depth=depth)
+                    self._video_number += 1
                     can_start = False
                     start_timer = time.time()
                 else:
                     current_time = time.time()
                     delta = current_time - start_timer
                     if delta > inter_recording_duration:
-                        print("back on")
                         can_start = True
             except KeyboardInterrupt:
                 self.stop_capture = True
@@ -435,9 +463,15 @@ class Kinect:
                 self.queue_video_writer_depth.stop_and_release()
                 break
 
+    def get_zfilled_video_number(self, n_zeros=4):
+        return str(self._video_number).zfill(n_zeros)
+
     def test_clicking_positions(self):
-        pyautogui.moveTo(self._position_live)
-        pyautogui.moveTo(self._position_record)
+        pyautogui.moveTo(self._position_live_button_doric)
+        pyautogui.moveTo(self._position_record_button_doric)
+
+    def update_current_time(self):
+        self._time = str(datetime.now().strftime("%H-%M-%S"))
 
     @staticmethod
     def frame_to_8bit(frame):
@@ -512,6 +546,7 @@ class Kinect:
         frame_copy[frame_copy < vmin] = vmin
         frame_copy[frame_copy > vmax] = vmax
         scaled_frame = ((frame_copy - vmin) / (vmax - vmin)) * 256
+        scaled_frame = scaled_frame.astype("uint8")
         return scaled_frame
 
     @staticmethod
@@ -533,10 +568,21 @@ class Kinect:
         pyautogui.moveTo(button)
         pyautogui.click()
 
+    @staticmethod
+    def clean_directory(folder_path):
+        for filename in os.listdir(folder_path):
+            file_path = os.path.join(folder_path, filename)
+            try:
+                if os.path.isfile(file_path) or os.path.islink(file_path):
+                    os.unlink(file_path)
+                elif os.path.isdir(file_path):
+                    shutil.rmtree(file_path)
+            except Exception as e:
+                print('Failed to delete %s. Reason: %s' % (file_path, e))
+
 
 class VideoWriter:
-    def __init__(self, video_writer, fn=0, fcc='XVID', duration=1 * 60, fps=15, saving_dir=os.path.expanduser("~")):
-        self._fourcc = fcc
+    def __init__(self, video_writer, fn=0, duration=20 * 60, fps=15):
         self._video_duration = duration
         self._video_fps = fps
         self._dt = 1. / self._video_fps
@@ -544,9 +590,7 @@ class VideoWriter:
         self._queue = queue.Queue()
         self._stop = False
         self._n = 0
-        self._saving_dir = saving_dir
         self._fn = fn
-        self._video_path = os.path.join(self._saving_dir, "{}.avi".format(self._fn))
         self._wrtr = threading.Thread(target=self.queue_writer)
         self._wrtr.start()
 

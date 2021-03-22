@@ -1,4 +1,4 @@
-import kinect_video_recording as kvr
+import video_recording as kvr
 import utilities as utils
 
 if __name__ == "__main__":

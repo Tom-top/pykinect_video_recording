@@ -1,6 +1,7 @@
 import os
 
 import configparser
+import configobj
 
 proceed_messages = ["y", "yes", ""]
 redo_messages = ["r", "re", "redo"]
@@ -30,8 +31,8 @@ def setup_recording():
 
 def load_config():
     config = configparser.ConfigParser()
-    if "config.ini" in os.listdir():
-        config.read("config.ini")
+    if "config.cfg" in os.listdir():
+        config.read("config.cfg")
         return config
     else:
-        raise mouseTrackerException("config.ini file is missing in {}".format(os.getcwd()))
+        raise mouseTrackerException("config.cfg file is missing in {}".format(os.getcwd()))
