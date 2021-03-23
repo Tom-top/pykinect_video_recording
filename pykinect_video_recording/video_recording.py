@@ -400,12 +400,10 @@ class Kinect:
         self.stop_capture = False
         self.set_video_writers(fps, saving_directory, color=color, depth=depth)
         self.queue_video_writer_color = VideoWriter(self.video_writer_color,
-                                                    saving_dir=saving_directory,
                                                     fn="color",
                                                     fps=fps,
                                                     duration=recording_duration)
         self.queue_video_writer_depth = VideoWriter(self.video_writer_depth,
-                                                    saving_dir=saving_directory,
                                                     fn="depth",
                                                     fps=fps,
                                                     duration=recording_duration)
@@ -458,11 +456,6 @@ class Kinect:
         shutil.copy(os.path.join(os.getcwd(), "config.cfg"),
                     os.path.join(saving_directory, "config_{}_{}.ini" \
                                  .format(self._animal, self._experiment)),)
-        # fps = int(fps)
-        # recording_duration = int(recording_duration)
-        # inter_recording_duration = int(inter_recording_duration)
-        # color = bool(color)
-        # depth = bool(depth)
         can_start = True
         while True:
             try:
@@ -474,11 +467,11 @@ class Kinect:
                     if os.path.exists(saving_folder_path):
                         if os.listdir(saving_folder_path) != 0:
                             self.clean_directory(saving_folder_path)
-                    os.mkdir(saving_folder_path)
+                    else:
+                        os.mkdir(saving_folder_path)
                     self.capture_camera_feed(saving_folder_path,
                                              fps=fps,
                                              recording_duration=recording_duration,
-                                             inter_recording_duration=inter_recording_duration,
                                              color=color,
                                              depth=depth)
                     self._video_number += 1
