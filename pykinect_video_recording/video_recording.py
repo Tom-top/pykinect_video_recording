@@ -19,6 +19,7 @@ import numpy as np
 import cv2
 import matplotlib.pyplot as plt
 
+
 from pykinect2 import PyKinectV2, PyKinectRuntime
 
 
@@ -27,16 +28,18 @@ class KinectException(Exception):
 
 
 class Kinect:
+    MONITOR_SIZE = pyautogui.size()
+
     def __init__(self, experiment, animal, verbose=False):
+        self._camera_is_on = False
         self._experiment = experiment
         self._animal = animal
         self._verbose = verbose
         self.update_current_time()
-        self._monitor_size = pyautogui.size()
         self._position_live_button_doric = (1370, 250)
         self._position_record_button_doric = (1500, 250)
 
-        self.initialize_kinect()
+        self.turn_on()
         self._color_width, self._color_height = self.get_color_dimensions()
         self._color_area = self._color_width * self._color_height
         self._color_space_point = PyKinectV2._ColorSpacePoint
@@ -54,17 +57,20 @@ class Kinect:
         self._video_number = 0
         self._zfilled_video_number = self.get_zfilled_video_number()
 
-    def initialize_kinect(self):
-        self._kinect = PyKinectRuntime.PyKinectRuntime(
-            PyKinectV2.FrameSourceTypes_Depth |
-            PyKinectV2.FrameSourceTypes_Color)
+    def turn_on(self):
+        self._kinect = PyKinectRuntime.PyKinectRuntime(PyKinectV2.FrameSourceTypes_Depth |
+                                                       PyKinectV2.FrameSourceTypes_Color)
+        self._camera_is_on = True
         time.sleep(2)  # This is not a mistake, if this is disabled the kinect
         # Fails to load the first frame.
 
     def turn_off(self):
         self._kinect.close()
+        self._camera_is_on = False
 
     def get_raw_color_frame(self):
+        if not self._camera_is_on:
+            self.turn_on()
         if self._kinect.has_new_color_frame():
             color_frame = self._kinect.get_last_color_frame()
             return color_frame
@@ -74,6 +80,8 @@ class Kinect:
             return None
 
     def get_raw_depth_frame(self):
+        if not self._camera_is_on:
+            self.turn_on()
         if self._kinect.has_new_depth_frame():
             depth_frame = self._kinect.get_last_depth_frame()
             return depth_frame
@@ -122,7 +130,7 @@ class Kinect:
                 depth_frame = self.frame_to_8bit(raw_depth_frame)
                 return depth_frame
 
-    def determine_registration_parameters(self):
+    def get_registration_parameters(self):
         """Inspired by https://github.com/KonstantinosAng/
         PyKinect2-Mapper-Functions/blob/master/mapper.py
         """
@@ -141,22 +149,23 @@ class Kinect:
         depth_x_y = depth_x_y.reshape(self._color_height,
                                       self._color_width,
                                       2).astype(int)
-        depth_x = np.clip(depth_x_y[:, :, 0], 0, self._depth_width - 1)
-        depth_y = np.clip(depth_x_y[:, :, 1], 0, self._depth_height - 1)
+        depth_x_params = np.clip(depth_x_y[:, :, 0], 0, self._depth_width - 1)
+        depth_y_params = np.clip(depth_x_y[:, :, 1], 0, self._depth_height - 1)
 
-        return depth_x, depth_y
+        return depth_x_params, depth_y_params
 
     def register_depth_to_color(self, flip=True):
-        raw_depth_frame = self.get_depth_frame(flip=False, return_raw=True)
+        raw_depth_frame = self.get_depth_frame(flip=False,
+                                               return_raw=True)  # The flip=False is mandatory for the registration
         if raw_depth_frame is None:
             return None
-        self.registered_depth_frame = np.zeros((self._color_height, self._color_width),
-                                               dtype=np.uint16)
-        self._depth_x, self._depth_y = self.determine_registration_parameters()
-        self.registered_depth_frame[:, :] = raw_depth_frame[self._depth_y, self._depth_x]
+        registered_depth_frame = np.zeros((self._color_height, self._color_width),
+                                          dtype=np.uint16)
+        depth_x_params, depth_y_params = self.get_registration_parameters()
+        registered_depth_frame[:, :] = raw_depth_frame[depth_y_params, depth_x_params]
         if flip:
-            self.registered_depth_frame = self.flip_frame_horizontally(self.registered_depth_frame)
-        return self.registered_depth_frame
+            registered_depth_frame = self.flip_frame_horizontally(registered_depth_frame)
+        return registered_depth_frame
 
     def set_cropping_params(self, upper_left, lower_right):
         self._roi_reference = [upper_left, lower_right]
@@ -215,13 +224,12 @@ class Kinect:
     def crop_frame_from_params(self, frame):
         if self._roi_reference:
             return frame[self._roi_reference[0][1]:self._roi_reference[1][1],
-                   self._roi_reference[0][0]:self._roi_reference[1][0]]
+                         self._roi_reference[0][0]:self._roi_reference[1][0]]
         else:
             return frame
 
     def set_16bit_data_range(self, vmin=0, vmax=256):
         vmin, vmax = int(vmin), int(vmax)
-        self.range_for_depth_conversion_is_set = True
         if vmin < 0 and vmax < 0:
             raise KinectException("vmin and vmax can't both be negative")
         if vmin > vmax:
@@ -235,6 +243,7 @@ class Kinect:
             vmin = vmax - 256
         self._depth_vmin = vmin
         self._depth_vmax = vmax
+        self.range_for_depth_conversion_is_set = True
 
     def check_depth_histogram(self, zoom_raw=(), bins=300):
         depth_frame = self.register_depth_to_color()
@@ -256,11 +265,11 @@ class Kinect:
 
         ax1 = plt.subplot(4, 1, 2)
         ax1.hist(cropped_depth_frame.flatten(), bins=bins)
-        #        ax1.vlines([self._depth_vmin, self._depth_vmax],
-        #                   ymin=0,
-        #                   ymax=y_max,
-        #                   color="red",
-        #                   linewidth=1)
+        ax1.vlines([self._depth_vmin, self._depth_vmax],
+                   ymin=0,
+                   ymax=y_max,
+                   color="red",
+                   linewidth=1)
         if zoom_raw:
             ax1.set_xlim(zoom_raw[0], zoom_raw[1])
         else:
@@ -280,7 +289,7 @@ class Kinect:
         plt.tight_layout()
         plt.show()
 
-    def set_percentage_window_size(self, percentage):
+    def set_window_resizing_factor(self, percentage):
         self._window_resizing_factor = percentage
 
     def show_live_feed(self, color=True, depth=True, flip=True):
@@ -424,13 +433,12 @@ class Kinect:
                                  depth=True):
         shutil.copy(os.path.join(os.getcwd(), "config.cfg"),
                     os.path.join(saving_directory, "config_{}_{}.ini" \
-                                 .format(self._animal, self._experiment)),
-                    )
-        fps = int(fps)
-        recording_duration = int(recording_duration)
-        inter_recording_duration = int(inter_recording_duration)
-        color = bool(color)
-        depth = bool(depth)
+                                 .format(self._animal, self._experiment)),)
+        # fps = int(fps)
+        # recording_duration = int(recording_duration)
+        # inter_recording_duration = int(inter_recording_duration)
+        # color = bool(color)
+        # depth = bool(depth)
         can_start = True
         while True:
             try:

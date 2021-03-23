@@ -1,6 +1,5 @@
 import os
 
-import configparser
 import configobj
 
 proceed_messages = ["y", "yes", ""]
@@ -10,12 +9,10 @@ redo_messages = ["r", "re", "redo"]
 class mouseTrackerException(Exception):
     pass
 
-
 def set_experiment_and_animal_tag():
     experiment = input("Please enter the experiments name: ")
     tag = input("Please enter the name/tag of the animal: ")
     return experiment, tag
-
 
 def setup_recording():
     experiment, tag = set_experiment_and_animal_tag()
@@ -28,11 +25,10 @@ def setup_recording():
     else:
         return False, experiment, tag
 
-
 def load_config():
-    config = configparser.ConfigParser()
-    if "config.cfg" in os.listdir():
-        config.read("config.cfg")
+    config_file_name = "config.cfg"
+    if config_file_name in os.listdir():
+        config = configobj.ConfigObj(config_file_name)
         return config
     else:
         raise mouseTrackerException("config.cfg file is missing in {}".format(os.getcwd()))
