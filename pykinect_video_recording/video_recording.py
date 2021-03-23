@@ -546,7 +546,7 @@ class VideoWriter:
         self._n = 0
         self._saving_dir = saving_dir
         self._fn = fn
-        self._video_path = os.path.join(self._saving_dir, "{}.avi".format(self._fn))
+        self._video_path = os.path.join(self._saving_dir, "{}.mp4".format(self._fn))
         self._wrtr = threading.Thread(target=self.queue_writer)
         self._wrtr.start()
 
