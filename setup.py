@@ -11,7 +11,7 @@ requirements = [
     'datetime',
     'configobj',
     'ffmpeg',
-    'opencv',
+    'opencv-contrib-python',
     'pykinect2',
 ]
 
