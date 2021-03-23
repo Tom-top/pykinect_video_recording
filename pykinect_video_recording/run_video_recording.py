@@ -5,17 +5,17 @@ Created on Fri Mar 19 11:08:11 2021
 @author: thomas.topilko
 """
 
-import video_recording as kvr
+import pykinect_video_recording.video_recording as kvr
 
 experiment, animal = 210319, 125
 kinect = kvr.Kinect(experiment, animal)
 
-kinect.set_roi()
+kinect.set_roi(resize_window=0.7)
 kinect.set_16bit_data_range(-1, 750)
 kinect.check_depth_histogram(zoom_raw=(400, 800), bins=100) #400, 800
 
-#kinect.check_camera_feed()
-#kinect.turn_off()
+kinect.show_live_feed(color=True, depth=True, resize_window=1)
+kinect.turn_off()
 
 saving_path = "D://Thomas/Photometry"
 #kinect.capture_camera_feed(15,

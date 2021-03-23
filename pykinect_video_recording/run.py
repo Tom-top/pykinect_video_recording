@@ -1,5 +1,5 @@
-import video_recording as kvr
-import utilities as utils
+import pykinect_video_recording.video_recording as kvr
+import pykinect_video_recording.utilities as utils
 
 if __name__ == "__main__":
     proceed, experiment, tag = utils.setup_recording()

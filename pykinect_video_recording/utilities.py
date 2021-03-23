@@ -1,6 +1,7 @@
 import os
 
 import configobj
+from validate import Validator
 
 proceed_messages = ["y", "yes", ""]
 redo_messages = ["r", "re", "redo"]
@@ -27,8 +28,14 @@ def setup_recording():
 
 def load_config():
     config_file_name = "config.cfg"
-    if config_file_name in os.listdir():
-        config = configobj.ConfigObj(config_file_name)
-        return config
+    config_spec_file_name = "config.configspec"
+    if config_file_name in os.listdir() and config_spec_file_name in os.listdir():
+        config = configobj.ConfigObj(config_file_name, configspec=config_spec_file_name)
+        validator = Validator()
+        valid = config.validate(validator)
+        if valid:
+            return config
+        else:
+            raise mouseTrackerException("config could not ba validated")
     else:
         raise mouseTrackerException("config.cfg file is missing in {}".format(os.getcwd()))

@@ -205,7 +205,7 @@ class Kinect:
         for i in range(1, 5):
             cv2.waitKey(1)
 
-    def select_and_crop(self, event, x, y):
+    def select_and_crop(self, event, x, y, flags, params):
         if event == cv2.EVENT_LBUTTONDOWN:
             self._roi_reference = [(x, y)]
         elif event == cv2.EVENT_LBUTTONUP:
@@ -220,6 +220,11 @@ class Kinect:
                           (0, 0, 255),
                           2)
             cv2.imshow("color_frame", self.color_frame_roi)
+
+    def reset_roi(self):
+        self._roi_reference = []
+        self._roi_width = None
+        self._roi_height = None
 
     def crop_frame_from_params(self, frame):
         if self._roi_reference:
@@ -244,6 +249,11 @@ class Kinect:
         self._depth_vmin = vmin
         self._depth_vmax = vmax
         self.range_for_depth_conversion_is_set = True
+
+    def reset_16bit_data_range(self):
+        self._depth_vmin = None
+        self._depth_vmax = None
+        self.range_for_depth_conversion_is_set = False
 
     def check_depth_histogram(self, zoom_raw=(), bins=300):
         depth_frame = self.register_depth_to_color()
@@ -292,7 +302,20 @@ class Kinect:
     def set_window_resizing_factor(self, percentage):
         self._window_resizing_factor = percentage
 
-    def show_live_feed(self, color=True, depth=True, flip=True):
+    def update_window_size_to_crop(self, resize_window=None):
+        if self._roi_reference:
+            if resize_window is None:
+                self._window_width = int(self._roi_width * self._window_resizing_factor)
+                self._window_height = int(self._roi_height * self._window_resizing_factor)
+            else:
+                self._window_width = int(self._roi_width * resize_window)
+                self._window_height = int(self._roi_height * resize_window)
+
+    def show_live_feed(self, color=True, depth=True, flip=True, resize_window=None):
+        if not any([color, depth]):
+            raise ValueError("Both color and depth were set to False!\n\
+                             at least one camera feed has to be enabled")
+        self.update_window_size_to_crop(resize_window=resize_window)
         if color and not depth:
             cv2.namedWindow("color", cv2.WINDOW_NORMAL)
             cv2.resizeWindow("color", (self._window_width, self._window_height))
@@ -323,7 +346,8 @@ class Kinect:
             elif depth and not color:
                 cv2.imshow("depth", current_depth_frame)
             elif color and depth:
-                color_and_depth = cv2.hstack((current_color_frame, current_depth_frame))
+                current_depth_frame = cv2.cvtColor(current_depth_frame, cv2.COLOR_GRAY2BGR)
+                color_and_depth = np.hstack((current_color_frame, current_depth_frame))
                 cv2.imshow("color_and_depth", color_and_depth)
 
             if cv2.waitKey(1) & 0xFF == ord('q'):
@@ -546,7 +570,10 @@ class Kinect:
 
     @staticmethod
     def scale_image_to_8bit(frame):
-        return ((frame - min(frame)) / (max(frame) - min(frame))) * 256
+        frame_copy = frame.copy()
+        scaled_frame = ((frame_copy - np.min(frame_copy)) / (np.max(frame_copy) - np.min(frame_copy))) * 256
+        scaled_frame = scaled_frame.astype("uint8")
+        return scaled_frame
 
     @staticmethod
     def scale_image_to_8bit_from_data_range(frame, vmin, vmax):
